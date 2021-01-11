@@ -17,8 +17,8 @@ app.post('/updatePoint', async (req, res, next) => {
   const volumn = req.body.volumn
   const price = req.body.price
 
-  var memberObj = {}
-  var productObj = {}
+  let memberObj = {}
+  let productObj = {}
   fs.createReadStream(process.env.MEMBER)
     .pipe(csv())
     .on('data', (row) => {
@@ -45,7 +45,7 @@ app.post('/updatePoint', async (req, res, next) => {
           if (Object.keys(productObj).length === 0 && productObj.constructor === Object) {
             res.status(404).send('Not found');
           }
-          var mockJSON = {
+          let mockJSON = {
             memberId: memberId,
             productName: productObj.productName,
             receivePoint: 0
@@ -54,7 +54,7 @@ app.post('/updatePoint', async (req, res, next) => {
           const promotionDalta = productObj.priceRiseStartDate && productObj.priceRiseEndDate
             ? dayjs(datenow).isBefore(productObj.priceRiseEndDate) && dayjs(datenow).isAfter(productObj.priceRiseStartDate)
               ? productObj.samePriseDelta : 1 : 1
-          var capability;
+          let capability;
           if (productObj.productType === 'Oil') {
             fs.createReadStream(process.env.CAPABILITY_OIL)
               .pipe(csv())
@@ -80,7 +80,7 @@ app.post('/updatePoint', async (req, res, next) => {
                 res.status(202).json(mockJSON)
               })
           } else if (productObj.productType === 'Non-Oil') {
-            var merchantBuSize;
+            let merchantBuSize;
             fs.createReadStream(process.env.MERCHANT)
               .pipe(csv())
               .on('data', (row) => {

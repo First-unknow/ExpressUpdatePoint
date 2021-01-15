@@ -1,8 +1,8 @@
 const express = require('express')
 const bodyParser = require('body-parser')
-const dayjs = require('dayjs')
-const csv = require('csv-parser');
-const fs = require('fs');
+
+const readCSV = require('./readCSV');
+const calculatePoint = require('./calculatePoint')
 
 const app = express()
 
@@ -10,105 +10,61 @@ require('dotenv').config()
 
 app.use(bodyParser.json())
 
-app.post('/updatePoint', async (req, res, next) => {
+app.post('/updatePoint', async (req, res) => {
   const memberId = req.body.memberId
   const productCode = req.body.productCode
   const terminalId = req.body.terminalId
   const volumn = req.body.volumn
   const price = req.body.price
 
-  let memberObj = {}
-  let productObj = {}
-  fs.createReadStream(process.env.MEMBER)
-    .pipe(csv())
-    .on('data', (row) => {
-      if (memberId.length === 10) {
-        if (row.mobileNumber === memberId) {
-          memberObj = row
-        }
-      } else if (memberId.length === 16) {
-        if (row.cardNumber === memberId) {
-          memberObj = row
-        }
-      }
-    }).on('end', () => {
-      if (Object.keys(memberObj).length === 0 && memberObj.constructor === Object) {
-        res.status(404).send('Not found');
-      }
-      fs.createReadStream(process.env.PRODUCT)
-        .pipe(csv())
-        .on('data', (row) => {
-          if (row.productCode === productCode) {
-            productObj = row
-          }
-        }).on('end', () => {
-          if (Object.keys(productObj).length === 0 && productObj.constructor === Object) {
-            res.status(404).send('Not found');
-          }
-          let mockJSON = {
-            memberId: memberId,
-            productName: productObj.productName,
-            receivePoint: 0
-          }
-          let datenow = dayjs().format('DD/MMM/YYYY hh:mm:ss A')
-          const promotionDalta = productObj.priceRiseStartDate && productObj.priceRiseEndDate
-            ? dayjs(datenow).isBefore(productObj.priceRiseEndDate) && dayjs(datenow).isAfter(productObj.priceRiseStartDate)
-              ? productObj.samePriseDelta : 1 : 1
-          let capability;
-          if (productObj.productType === 'Oil') {
-            fs.createReadStream(process.env.CAPABILITY_OIL)
-              .pipe(csv())
-              .on('data', (row) => {
-                if (row.memberClass === (memberObj.memberClass === '' ? 'Default' : memberObj.memberClass) && row.productGroup === productObj.ProductGroup) {
-                  capability = row.capTime
-                }
-              }).on('end', () => {
-                let newVolumn = volumn > capability ? capability : volumn
-                if (productObj.ProductGroup === 'Gasohol') {
-                  if (memberObj.cardType != 'Normal') {
-                    mockJSON.receivePoint = newVolumn * 1.25 * promotionDalta
-                  } else {
-                    mockJSON.receivePoint = newVolumn * 1 * promotionDalta
-                  }
-                } else if (productObj.ProductGroup === 'Diesel') {
-                  if (memberObj.cardType != 'Normal') {
-                    mockJSON.receivePoint = (newVolumn / 2) * 1 * promotionDalta
-                  } else {
-                    mockJSON.receivePoint = (newVolumn / 4) * 1 * promotionDalta
-                  }
-                }
-                res.status(202).json(mockJSON)
-              })
-          } else if (productObj.productType === 'Non-Oil') {
-            let merchantBuSize;
-            fs.createReadStream(process.env.MERCHANT)
-              .pipe(csv())
-              .on('data', (row) => {
-                if (row.terminalID === terminalId) {
-                  merchantBuSize = row.buSize === '' ? 'Default' : row.buSize
-                }
-              }).on('end', () => {
-                if (merchantBuSize === undefined){
-                  res.status(404).send('Not found');
-                }
-                fs.createReadStream(process.env.CAPABILITY_NON_OIL)
-                  .pipe(csv())
-                  .on('data', (row) => {
-                    if (row.buSize === merchantBuSize) {
-                      capability = row.capTime
-                    }
-                  }).on('end', () => {
-                    let newPrice = price > capability ? capability : price
-                    const receivePoint = newPrice / 25 * promotionDalta
-                    mockJSON.receivePoint = receivePoint
-                    res.status(202).json(mockJSON)
-                  })
-              })
-          } else {
-            res.status(404)
-          }
-        })
-    });
+  if (Object.getOwnPropertyNames(req.body).length == 0) {
+    res.status(400).send('Bad Request');
+  }
+
+  if ((Object.keys(memberId).length === 0) || (Object.keys(productCode).length === 0) || (Object.keys(terminalId).length === 0)
+    || (Object.keys(volumn).length === 0) || (Object.keys(price).length === 0)) {
+    res.status(403).send('Forbidden');
+  }
+  try {
+
+    const currentMember = await readCSV.findMember(memberId)
+    const currentProduct = await readCSV.findProduct(productCode)
+
+    //เช็คว่าเจอ member ไหม
+    if (Object.keys(currentMember).length === 0 && currentMember.constructor === Object) {
+      res.status(404).send('Not found');
+    }
+
+    //เช็คว่าเจอ product ไหม
+    if (Object.keys(currentProduct).length === 0 && currentProduct.constructor === Object) {
+      res.status(404).send('Not found');
+    }
+
+    let mockupRes = {
+      memberId: memberId,
+      productName: currentProduct.productName,
+      receivePoint: 0
+    }
+    
+    if (currentProduct.productType === 'Oil') {
+      const maxCapabilityOil = await readCSV.findCapabilityOil(currentMember.memberClass, currentProduct.ProductGroup)
+      
+      mockupRes.receivePoint = calculatePoint.pointOil(volumn, maxCapabilityOil, currentProduct, )
+      res.status(202).json(mockupRes)
+
+    } else if (currentProduct.productType === 'Non-Oil') {
+      const maxCapabilityNonOil = await readCSV.findCapabilityNonOil(await readCSV.findBuSize(terminalId))
+
+      mockupRes.receivePoint = await calculatePoint.pointNonOil(price, maxCapabilityNonOil, currentProduct)
+      res.status(202).json(mockupRes)
+
+    } else {
+      res.status(404).send('Not found')
+    }
+  } catch (e) {
+    console.log("🚀 ~ file: main.js ~ line 122 ~ app.post ~ e", e)
+    res.status(400).send('Bad Request')
+  }
 })
 
 app.listen(7000, () => {

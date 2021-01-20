@@ -49,7 +49,7 @@ app.post('/updatePoint', async (req, res) => {
     if (currentProduct.productType === 'Oil') {
       const maxCapabilityOil = await readCSV.findCapabilityOil(currentMember.memberClass, currentProduct.ProductGroup)
       
-      mockupRes.receivePoint = calculatePoint.pointOil(volumn, maxCapabilityOil, currentProduct, )
+      mockupRes.receivePoint = calculatePoint.pointOil(volumn, maxCapabilityOil, currentProduct, currentMember.cardType)
       res.status(202).json(mockupRes)
 
     } else if (currentProduct.productType === 'Non-Oil') {
